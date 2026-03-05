@@ -5,6 +5,7 @@ interface OpenTwoAPI {
     Array<{ id: string; name: string; thumbnail: string }>
   >
   getCursorPosition: () => Promise<{ x: number; y: number }>
+  getDisplayInfo: () => Promise<{ scaleFactor: number; width: number; height: number }>
 
   saveFile: (filePath: string, buffer: ArrayBuffer) => Promise<boolean>
   saveJson: (filePath: string, data: unknown) => Promise<boolean>
@@ -19,6 +20,7 @@ interface OpenTwoAPI {
     videoBuffer: ArrayBuffer
     cursorData: Array<{ x: number; y: number; t: number }>
     clickEvents?: Array<{ x: number; y: number; t: number; button: number }>
+    displayInfo?: { scaleFactor: number; width: number; height: number }
     projectName?: string
   }) => Promise<{
     success: boolean
@@ -59,6 +61,9 @@ interface OpenTwoAPI {
   getPhoneDevices: () => Promise<
     Array<{ serial: string; model: string; status: 'device' | 'offline' | 'unauthorized' }>
   >
+
+  startGlobalMouseCapture: (startTime: number) => Promise<boolean>
+  stopGlobalMouseCapture: () => Promise<Array<{ x: number; y: number; t: number; button: number }>>
 }
 
 declare global {

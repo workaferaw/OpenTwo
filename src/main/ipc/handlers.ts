@@ -118,6 +118,7 @@ export function registerIpcHandlers(): void {
     videoBuffer: ArrayBuffer
     cursorData: Array<{ x: number; y: number; t: number }>
     clickEvents?: Array<{ x: number; y: number; t: number; button: number }>
+    displayInfo?: { scaleFactor: number; width: number; height: number }
     projectName?: string
   }) => {
     try {
@@ -137,7 +138,10 @@ export function registerIpcHandlers(): void {
       const mp4Path = join(projectDir, 'ready.mp4')
 
       await writeFile(webmPath, Buffer.from(options.videoBuffer))
-      await writeFile(cursorPath, JSON.stringify(options.cursorData, null, 2))
+      await writeFile(cursorPath, JSON.stringify({
+        points: options.cursorData,
+        displayInfo: options.displayInfo || null
+      }, null, 2))
       await writeFile(clicksPath, JSON.stringify(options.clickEvents || [], null, 2))
       await writeFile(projectJsonPath, JSON.stringify({
         version: 1,
@@ -154,6 +158,7 @@ export function registerIpcHandlers(): void {
             outputPath: mp4Path,
             cursorData: options.cursorData,
             clickEvents: options.clickEvents || [],
+            displayInfo: options.displayInfo,
             zoomFactor: 2,
             smoothing: 0.08
           },

@@ -12,8 +12,7 @@ import { CursorPoint } from '../stores/recording'
 type EditorTool = 'select' | 'zoom' | 'blur'
 
 function toMediaUrl(filePath: string): string {
-  // Use file:// protocol — works with webSecurity: false in dev, and via IPC buffer in prod
-  return 'file:///' + filePath.replace(/\\/g, '/')
+  return 'media://' + filePath.replace(/\\/g, '/')
 }
 
 interface EditorProps {
@@ -32,6 +31,7 @@ function Editor({ onBack }: EditorProps): JSX.Element {
 
   const [activeTool, setActiveTool] = useState<EditorTool>('select')
   const [cursorData, setCursorData] = useState<CursorPoint[]>([])
+  const [displayInfo, setDisplayInfo] = useState<{ scaleFactor: number; width: number; height: number } | null>(null)
   const [videoSize, setVideoSize] = useState({ width: 1920, height: 1080 })
   const [loadedFilePath, setLoadedFilePath] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -46,20 +46,96 @@ function Editor({ onBack }: EditorProps): JSX.Element {
     if (!filePath) return
 
     setLoadedFilePath(filePath)
-    setVideoSrc(toMediaUrl(filePath))
 
-    const cursorPath = filePath.replace(/\.(webm|mp4)$/, '.cursor.json')
+    // Load video file as buffer and create a blob URL (replaces broken media:// protocol)
+    const videoResult = await window.api.readFileBuffer(filePath)
+    if (!videoResult.success || !videoResult.data) {
+      addToast('Failed to load video file', 'error')
+      return
+    }
+    const mimeType = filePath.endsWith('.mp4') ? 'video/mp4' : 'video/webm'
+    const blob = new Blob([videoResult.data], { type: mimeType })
+    const blobUrl = URL.createObjectURL(blob)
+    setVideoSrc(blobUrl)
+
+    // Look for cursor.json in the same directory as the video
+    const dir = filePath.replace(/[/\\][^/\\]+$/, '')
+    const sep = filePath.includes('/') ? '/' : '\\'
+    const cursorPath = dir + sep + 'cursor.json'
     const cursorResult = await window.api.readJsonFile(cursorPath)
-    if (cursorResult.success && Array.isArray(cursorResult.data)) {
-      setCursorData(cursorResult.data)
+    if (cursorResult.success && cursorResult.data) {
+      // Handle both old format (plain array) and new format ({points, displayInfo})
+      const raw = cursorResult.data as unknown
+      if (Array.isArray(raw)) {
+        setCursorData(raw)
+        setDisplayInfo(null)
+      } else if (raw && typeof raw === 'object' && 'points' in raw) {
+        const wrapped = raw as { points: CursorPoint[]; displayInfo?: { scaleFactor: number; width: number; height: number } }
+        setCursorData(wrapped.points)
+        setDisplayInfo(wrapped.displayInfo || null)
+      } else {
+        setCursorData([])
+        setDisplayInfo(null)
+      }
       setCursorFollow({ enabled: true })
       addToast('Loaded with cursor follow enabled', 'success')
     } else {
       setCursorData([])
+      setDisplayInfo(null)
       setCursorFollow({ enabled: false })
       addToast('Loaded recording (no cursor data found)', 'info')
     }
   }, [setVideoSrc, setCursorFollow, addToast])
+
+  // Auto-load recording directly from a file path (used by auto-navigate and sessionStorage)
+  const loadProjectFromPath = useCallback(async (filePath: string) => {
+    setLoadedFilePath(filePath)
+
+    const videoResult = await window.api.readFileBuffer(filePath)
+    if (!videoResult.success || !videoResult.data) {
+      addToast('Failed to load video file', 'error')
+      return
+    }
+    const mimeType = filePath.endsWith('.mp4') ? 'video/mp4' : 'video/webm'
+    const blob = new Blob([videoResult.data], { type: mimeType })
+    const blobUrl = URL.createObjectURL(blob)
+    setVideoSrc(blobUrl)
+
+    const dir = filePath.replace(/[/\\][^/\\]+$/, '')
+    const sep = filePath.includes('/') ? '/' : '\\'
+    const cursorPath = dir + sep + 'cursor.json'
+    const cursorResult = await window.api.readJsonFile(cursorPath)
+    if (cursorResult.success && cursorResult.data) {
+      const raw = cursorResult.data as unknown
+      if (Array.isArray(raw)) {
+        setCursorData(raw)
+        setDisplayInfo(null)
+      } else if (raw && typeof raw === 'object' && 'points' in raw) {
+        const wrapped = raw as { points: CursorPoint[]; displayInfo?: { scaleFactor: number; width: number; height: number } }
+        setCursorData(wrapped.points)
+        setDisplayInfo(wrapped.displayInfo || null)
+      } else {
+        setCursorData([])
+        setDisplayInfo(null)
+      }
+      setCursorFollow({ enabled: true })
+      addToast('Loaded with cursor follow enabled', 'success')
+    } else {
+      setCursorData([])
+      setDisplayInfo(null)
+      setCursorFollow({ enabled: false })
+      addToast('Loaded recording (no cursor data found)', 'info')
+    }
+  }, [setVideoSrc, setCursorFollow, addToast])
+
+  // Auto-load from sessionStorage (set by Recorder's auto-navigate after recording)
+  useEffect(() => {
+    const autoPath = sessionStorage.getItem('opentwo:auto-load')
+    if (autoPath) {
+      sessionStorage.removeItem('opentwo:auto-load')
+      loadProjectFromPath(autoPath)
+    }
+  }, [loadProjectFromPath])
 
   // Set video source when videoSrc changes
   useEffect(() => {
@@ -324,8 +400,8 @@ function Editor({ onBack }: EditorProps): JSX.Element {
             onClick={() => setCursorFollow({ enabled: !cursorFollow.enabled })}
             disabled={cursorData.length === 0}
             className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-colors ${cursorFollow.enabled
-                ? 'bg-emerald-500 text-white'
-                : 'bg-surface-200 text-white/50 hover:text-white/90'
+              ? 'bg-emerald-500 text-white'
+              : 'bg-surface-200 text-white/50 hover:text-white/90'
               } disabled:opacity-30`}
           >
             {cursorFollow.enabled ? 'Follow: ON' : 'Follow'}
@@ -368,8 +444,8 @@ function Editor({ onBack }: EditorProps): JSX.Element {
           <button
             onClick={() => setShowBrowserFrame(!showBrowserFrame)}
             className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-colors ${showBrowserFrame
-                ? 'bg-accent-600 text-white'
-                : 'bg-surface-200 text-white/50 hover:text-white/90'
+              ? 'bg-accent-600 text-white'
+              : 'bg-surface-200 text-white/50 hover:text-white/90'
               }`}
           >
             Frame
@@ -379,8 +455,8 @@ function Editor({ onBack }: EditorProps): JSX.Element {
           <button
             onClick={() => setShowSettings(!showSettings)}
             className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-colors ${showSettings
-                ? 'bg-accent-600 text-white'
-                : 'bg-surface-200 text-white/50 hover:text-white/90'
+              ? 'bg-accent-600 text-white'
+              : 'bg-surface-200 text-white/50 hover:text-white/90'
               }`}
           >
             BG
@@ -495,6 +571,7 @@ function Editor({ onBack }: EditorProps): JSX.Element {
             width={videoSize.width}
             height={videoSize.height}
             cursorData={cursorData}
+            displayInfo={displayInfo}
           />
           {!cursorFollow.enabled && cursorData.length > 0 && (
             <CursorOverlay
@@ -532,8 +609,8 @@ function ToolBtn({ active, onClick, label, icon }: ToolBtnProps): JSX.Element {
     <button
       onClick={onClick}
       className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-150 ${active
-          ? 'bg-accent-500/15 text-accent-400'
-          : 'bg-surface-200 text-white/50 hover:text-white/90 hover:bg-surface-300'
+        ? 'bg-accent-500/15 text-accent-400'
+        : 'bg-surface-200 text-white/50 hover:text-white/90 hover:bg-surface-300'
         }`}
     >
       {icon}

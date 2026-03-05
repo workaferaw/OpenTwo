@@ -1,30 +1,28 @@
 import {
   app, shell, BrowserWindow, Tray, Menu, nativeImage,
-  ipcMain, desktopCapturer, screen, globalShortcut
+  ipcMain, desktopCapturer, screen, globalShortcut,
+  protocol, net
 } from 'electron'
 import { join } from 'path'
+import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import { registerIpcHandlers } from './ipc/handlers'
-
-// Inline dev detection — avoids @electron-toolkit/utils module load crash
-const isDev = (): boolean => !app.isPackaged
-
-// Inline window shortcut watcher (dev only: F12 for devtools)
-function watchWindowShortcuts(window: BrowserWindow): void {
-  window.webContents.on('before-input-event', (event, input) => {
-    if (input.type === 'keyDown' && input.code === 'F12') {
-      if (window.webContents.isDevToolsOpened()) {
-        window.webContents.closeDevTools()
-      } else {
-        window.webContents.openDevTools({ mode: 'undocked' })
-      }
-    }
-  })
-}
+import { startGlobalClickCapture, stopGlobalClickCapture } from './capture/global-mouse'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'media',
+    privileges: {
+      stream: true,
+      bypassCSP: true,
+      supportFetchAPI: true,
+      corsEnabled: true
+    }
+  }
+])
 
 function getIconPath(): string {
   const iconName = process.platform === 'win32' ? 'icon.png' : 'icon.png'
@@ -47,8 +45,7 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegration: false,
-      webSecurity: !isDev()
+      nodeIntegration: false
     }
   })
 
@@ -61,7 +58,7 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  if (isDev() && process.env['ELECTRON_RENDERER_URL']) {
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
@@ -93,10 +90,20 @@ function createTray(): void {
 }
 
 app.whenReady().then(() => {
-  if (process.platform === 'win32') app.setAppUserModelId('com.opentwo.app')
+  electronApp.setAppUserModelId('com.opentwo.app')
+
+  protocol.handle('media', (request) => {
+    // request.url looks like: media://C:/Users/worka/Videos/opentwo-.../recording.webm
+    const raw = request.url.replace('media://', '')
+    const filePath = decodeURIComponent(raw)
+    // Ensure proper file:// URL format for Windows paths
+    const normalized = filePath.replace(/\\/g, '/')
+    const fileUrl = normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`
+    return net.fetch(fileUrl)
+  })
 
   app.on('browser-window-created', (_, window) => {
-    watchWindowShortcuts(window)
+    optimizer.watchWindowShortcuts(window)
   })
 
   registerIpcHandlers()
@@ -143,6 +150,24 @@ app.whenReady().then(() => {
     return { x: point.x * sf, y: point.y * sf }
   })
 
+  ipcMain.handle('display:get-info', () => {
+    const primary = screen.getPrimaryDisplay()
+    return {
+      scaleFactor: primary.scaleFactor,
+      width: primary.size.width,
+      height: primary.size.height
+    }
+  })
+
+  ipcMain.handle('global-mouse:start', (_, startTime: number) => {
+    startGlobalClickCapture(startTime)
+    return true
+  })
+
+  ipcMain.handle('global-mouse:stop', () => {
+    return stopGlobalClickCapture()
+  })
+
   createWindow()
   createTray()
 
@@ -154,7 +179,7 @@ app.whenReady().then(() => {
     mainWindow?.webContents.send('tray:stop-recording')
   })
 
-  if (!isDev()) {
+  if (!is.dev) {
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
     autoUpdater.checkForUpdatesAndNotify()

@@ -20,7 +20,7 @@ function formatDuration(ms: number): string {
 function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element {
   const {
     status, selectedSource, setSelectedSource, setStatus,
-    setMediaRecorder, addChunk, addCursorPoint, addClickEvent,
+    setMediaRecorder, addChunk, addCursorPoint,
     setStartTime, reset
   } = useRecordingStore()
   const { selectedMicId } = useSettingsStore()
@@ -43,6 +43,7 @@ function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element 
   const elapsedRef = useRef(0)
   const recordingStartRef = useRef(0)
   const stopResolveRef = useRef<(() => void) | null>(null)
+  const displayInfoRef = useRef<{ scaleFactor: number; width: number; height: number } | null>(null)
 
   useEffect(() => {
     window.api.getDesktopSources().then(setSources)
@@ -63,21 +64,21 @@ function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element 
   useEffect(() => {
     if (!selectedSource) return
     let cancelled = false
-    ;(async () => {
-      previewStreamRef.current?.getTracks().forEach((t) => t.stop())
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            // @ts-expect-error Electron desktopCapturer mandatory constraints
-            mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selectedSource.id }
-          }
-        })
-        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return }
-        previewStreamRef.current = stream
-        if (previewVideoRef.current) previewVideoRef.current.srcObject = stream
-      } catch { /* source unavailable */ }
-    })()
+      ; (async () => {
+        previewStreamRef.current?.getTracks().forEach((t) => t.stop())
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              // @ts-expect-error Electron desktopCapturer mandatory constraints
+              mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selectedSource.id }
+            }
+          })
+          if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return }
+          previewStreamRef.current = stream
+          if (previewVideoRef.current) previewVideoRef.current.srcObject = stream
+        } catch { /* source unavailable */ }
+      })()
     return () => {
       cancelled = true
       previewStreamRef.current?.getTracks().forEach((t) => t.stop())
@@ -93,16 +94,16 @@ function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element 
       return
     }
     let cancelled = false
-    ;(async () => {
-      webcamStreamRef.current?.getTracks().forEach((t) => t.stop())
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: selectedCamera } }, audio: false
-        })
-        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return }
-        webcamStreamRef.current = stream
-      } catch { addToast('Could not access camera', 'error') }
-    })()
+      ; (async () => {
+        webcamStreamRef.current?.getTracks().forEach((t) => t.stop())
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: selectedCamera } }, audio: false
+          })
+          if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return }
+          webcamStreamRef.current = stream
+        } catch { addToast('Could not access camera', 'error') }
+      })()
     return () => {
       cancelled = true
       webcamStreamRef.current?.getTracks().forEach((t) => t.stop())
@@ -117,10 +118,22 @@ function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element 
     }
   }, [])
 
-  const startCursorTracking = useCallback(() => {
+  const startCursorTracking = useCallback(async () => {
     const startTime = Date.now()
     recordingStartRef.current = startTime
     setStartTime(startTime)
+
+    // Fetch display info once at recording start for proper coordinate normalization
+    try {
+      const info = await window.api.getDisplayInfo()
+      displayInfoRef.current = info
+    } catch { /* ignore — will fall back to heuristic */ }
+
+    // Start global mouse click capture (OS-level, captures clicks across all apps)
+    try {
+      await window.api.startGlobalMouseCapture(startTime)
+    } catch { /* ignore */ }
+
     cursorIntervalRef.current = setInterval(async () => {
       try {
         const pos = await window.api.getCursorPosition()
@@ -136,22 +149,6 @@ function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element 
     }
   }, [])
 
-  // Click capture via mousedown on window during recording
-  useEffect(() => {
-    if (status !== 'recording') return
-    const handler = (e: MouseEvent): void => {
-      if (recordingStartRef.current > 0) {
-        addClickEvent({
-          x: e.screenX,
-          y: e.screenY,
-          t: Date.now() - recordingStartRef.current,
-          button: e.button
-        })
-      }
-    }
-    window.addEventListener('mousedown', handler, true)
-    return () => window.removeEventListener('mousedown', handler, true)
-  }, [status, addClickEvent])
 
   const startTimer = useCallback(() => {
     elapsedRef.current = 0
@@ -234,7 +231,7 @@ function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element 
     })
 
     // All chunks are now flushed — safe to assemble
-    const { recordedChunks, cursorData, clickEvents } = useRecordingStore.getState()
+    const { recordedChunks, cursorData } = useRecordingStore.getState()
     if (recordedChunks.length === 0) {
       addToast('No data recorded', 'error')
       reset()
@@ -242,6 +239,12 @@ function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element 
       mediaRecorderRef.current = null
       return
     }
+
+    // Stop global mouse capture and get the collected clicks
+    let clickEvents: Array<{ x: number; y: number; t: number; button: number }> = []
+    try {
+      clickEvents = await window.api.stopGlobalMouseCapture()
+    } catch { /* ignore */ }
 
     const blob = new Blob(recordedChunks, { type: 'video/webm' })
     const buffer = await blob.arrayBuffer()
@@ -251,7 +254,8 @@ function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element 
     const result = await window.api.autoSaveRecording({
       videoBuffer: buffer,
       cursorData,
-      clickEvents
+      clickEvents,
+      displayInfo: displayInfoRef.current || undefined
     })
 
     if (result.success) {
@@ -259,6 +263,13 @@ function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element 
       if (result.mp4Path) parts.push('Ready MP4')
       parts.push('Editor project')
       addToast(`Saved: ${parts.join(' + ')}`, 'success')
+
+      // Auto-navigate to editor with the saved recording (Cursorful-style flow)
+      if (result.projectDir) {
+        const recordingPath = result.projectDir + (result.projectDir.includes('/') ? '/' : '\\') + 'recording.webm'
+        sessionStorage.setItem('opentwo:auto-load', recordingPath)
+        setTimeout(() => onOpenEditor(), 500) // Brief delay so user sees the toast
+      }
     } else {
       addToast(`Save failed: ${result.error}`, 'error')
     }
@@ -267,7 +278,7 @@ function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element 
     setElapsed(0)
     setSaving(false)
     mediaRecorderRef.current = null
-  }, [setStatus, stopCursorTracking, stopTimer, reset, addToast, saving])
+  }, [setStatus, stopCursorTracking, stopTimer, reset, addToast, saving, onOpenEditor])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -356,13 +367,11 @@ function Recorder({ onOpenEditor, onOpenSettings }: RecorderProps): JSX.Element 
           <div className="flex-1 flex flex-col items-center justify-center gap-3">
             <button onClick={handleRecord} disabled={(!selectedSource && status === 'idle') || saving}
               className="group relative w-16 h-16 rounded-full flex items-center justify-center transition-all duration-200 disabled:opacity-30">
-              <div className={`absolute inset-0 rounded-full transition-all duration-200 ${
-                status === 'recording' ? 'bg-red-500 shadow-lg shadow-red-500/30'
-                  : status === 'paused' ? 'bg-accent-500 shadow-lg shadow-accent-500/20'
+              <div className={`absolute inset-0 rounded-full transition-all duration-200 ${status === 'recording' ? 'bg-red-500 shadow-lg shadow-red-500/30'
+                : status === 'paused' ? 'bg-accent-500 shadow-lg shadow-accent-500/20'
                   : 'bg-surface-300 group-hover:bg-surface-400'}`} />
-              <div className={`relative transition-all duration-200 ${
-                status === 'recording' ? 'w-5 h-5 rounded-sm bg-white'
-                  : status === 'paused' ? '' : 'w-7 h-7 rounded-full bg-red-500 group-hover:bg-red-400 group-hover:scale-110'}`}>
+              <div className={`relative transition-all duration-200 ${status === 'recording' ? 'w-5 h-5 rounded-sm bg-white'
+                : status === 'paused' ? '' : 'w-7 h-7 rounded-full bg-red-500 group-hover:bg-red-400 group-hover:scale-110'}`}>
                 {status === 'paused' && <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>}
               </div>
             </button>

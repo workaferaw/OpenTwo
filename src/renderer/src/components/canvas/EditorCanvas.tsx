@@ -69,13 +69,15 @@ interface EditorCanvasProps {
   width: number
   height: number
   cursorData: CursorPoint[]
+  displayInfo: { scaleFactor: number; width: number; height: number } | null
 }
 
 function EditorCanvas({
   videoElement,
   width,
   height,
-  cursorData
+  cursorData,
+  displayInfo
 }: EditorCanvasProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animFrameRef = useRef<number>(0)
@@ -215,15 +217,21 @@ function EditorCanvas({
         const rawCursor = interpolateCursor(cursorDataRef.current, currentTimeMs)
         if (rawCursor) {
           // Normalize cursor coordinates to video dimensions
-          // Detect if cursor data range differs from video size
-          const data = cursorDataRef.current
-          let maxX = 0, maxY = 0
-          for (let i = 0; i < data.length; i += Math.max(1, (data.length >> 6))) {
-            if (data[i].x > maxX) maxX = data[i].x
-            if (data[i].y > maxY) maxY = data[i].y
+          // Use displayInfo if available; fall back to heuristic
+          let scX = 1, scY = 1
+          if (displayInfo) {
+            scX = vw / displayInfo.width
+            scY = vh / displayInfo.height
+          } else {
+            const data = cursorDataRef.current
+            let maxX = 0, maxY = 0
+            for (let i = 0; i < data.length; i += Math.max(1, (data.length >> 6))) {
+              if (data[i].x > maxX) maxX = data[i].x
+              if (data[i].y > maxY) maxY = data[i].y
+            }
+            scX = maxX > 0 && Math.abs(maxX - vw) > vw * 0.1 ? vw / maxX : 1
+            scY = maxY > 0 && Math.abs(maxY - vh) > vh * 0.1 ? vh / maxY : 1
           }
-          const scX = maxX > 0 && Math.abs(maxX - vw) > vw * 0.1 ? vw / maxX : 1
-          const scY = maxY > 0 && Math.abs(maxY - vh) > vh * 0.1 ? vh / maxY : 1
           const cursor = { x: rawCursor.x * scX, y: rawCursor.y * scY }
 
           const zoom = state.cursorFollow.zoomFactor
@@ -271,12 +279,12 @@ function EditorCanvas({
         ctx.fill()
 
         const dotY = drawY + frameHeight / 2
-        ;['#ff5f57', '#febc2e', '#28c840'].forEach((c, i) => {
-          ctx.fillStyle = c
-          ctx.beginPath()
-          ctx.arc(drawX + 16 + i * 20, dotY, 5, 0, Math.PI * 2)
-          ctx.fill()
-        })
+          ;['#ff5f57', '#febc2e', '#28c840'].forEach((c, i) => {
+            ctx.fillStyle = c
+            ctx.beginPath()
+            ctx.arc(drawX + 16 + i * 20, dotY, 5, 0, Math.PI * 2)
+            ctx.fill()
+          })
 
         ctx.fillStyle = '#1a1a1a'
         ctx.beginPath()

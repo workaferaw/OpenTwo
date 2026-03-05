@@ -4,6 +4,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 const api = {
   getDesktopSources: () => ipcRenderer.invoke('desktop-capturer:get-sources'),
   getCursorPosition: () => ipcRenderer.invoke('cursor:get-position'),
+  getDisplayInfo: () => ipcRenderer.invoke('display:get-info'),
 
   saveFile: (filePath: string, buffer: ArrayBuffer) =>
     ipcRenderer.invoke('file:save-buffer', filePath, buffer),
@@ -57,7 +58,10 @@ const api = {
   }) => ipcRenderer.invoke('recording:auto-save', options),
 
   checkAdb: () => ipcRenderer.invoke('phone:check-adb'),
-  getPhoneDevices: () => ipcRenderer.invoke('phone:get-devices')
+  getPhoneDevices: () => ipcRenderer.invoke('phone:get-devices'),
+
+  startGlobalMouseCapture: (startTime: number) => ipcRenderer.invoke('global-mouse:start', startTime),
+  stopGlobalMouseCapture: () => ipcRenderer.invoke('global-mouse:stop') as Promise<Array<{ x: number; y: number; t: number; button: number }>>
 }
 
 if (process.contextIsolated) {

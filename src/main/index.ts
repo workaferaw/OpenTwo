@@ -4,6 +4,7 @@ import {
 } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { autoUpdater } from 'electron-updater'
 import { registerIpcHandlers } from './ipc/handlers'
 
 let mainWindow: BrowserWindow | null = null
@@ -107,6 +108,19 @@ app.whenReady().then(() => {
   globalShortcut.register('F10', () => {
     mainWindow?.webContents.send('tray:stop-recording')
   })
+
+  if (!is.dev) {
+    autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = true
+    autoUpdater.checkForUpdatesAndNotify()
+
+    autoUpdater.on('update-available', () => {
+      mainWindow?.webContents.send('updater:available')
+    })
+    autoUpdater.on('update-downloaded', () => {
+      mainWindow?.webContents.send('updater:downloaded')
+    })
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

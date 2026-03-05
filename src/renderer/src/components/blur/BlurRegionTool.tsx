@@ -19,11 +19,11 @@ function BlurRegionTool({ active, canvasWidth, canvasHeight }: BlurRegionToolPro
       const rect = overlayRef.current?.getBoundingClientRect()
       if (!rect) return { x: 0, y: 0 }
       return {
-        x: ((e.clientX - rect.left) / rect.width) * canvasWidth,
-        y: ((e.clientY - rect.top) / rect.height) * canvasHeight
+        x: (e.clientX - rect.left) / rect.width,
+        y: (e.clientY - rect.top) / rect.height
       }
     },
-    [canvasWidth, canvasHeight]
+    []
   )
 
   const handleMouseDown = useCallback(
@@ -49,10 +49,10 @@ function BlurRegionTool({ active, canvasWidth, canvasHeight }: BlurRegionToolPro
     if (!drawing) return
     setDrawing(false)
 
-    const x = Math.min(startPos.x, currentPos.x)
-    const y = Math.min(startPos.y, currentPos.y)
-    const w = Math.abs(currentPos.x - startPos.x)
-    const h = Math.abs(currentPos.y - startPos.y)
+    const x = Math.min(startPos.x, currentPos.x) * canvasWidth
+    const y = Math.min(startPos.y, currentPos.y) * canvasHeight
+    const w = Math.abs(currentPos.x - startPos.x) * canvasWidth
+    const h = Math.abs(currentPos.y - startPos.y) * canvasHeight
 
     if (w < 10 || h < 10) return
 
@@ -62,11 +62,7 @@ function BlurRegionTool({ active, canvasWidth, canvasHeight }: BlurRegionToolPro
       endTime: Math.min(currentTime + 5, duration),
       region: { x, y, width: w, height: h }
     })
-  }, [drawing, startPos, currentPos, currentTime, duration, addBlurRegion])
-
-  const rect = overlayRef.current?.getBoundingClientRect()
-  const scaleX = rect ? rect.width / canvasWidth : 1
-  const scaleY = rect ? rect.height / canvasHeight : 1
+  }, [drawing, startPos, currentPos, currentTime, duration, addBlurRegion, canvasWidth, canvasHeight])
 
   return (
     <div
@@ -81,10 +77,10 @@ function BlurRegionTool({ active, canvasWidth, canvasHeight }: BlurRegionToolPro
         <div
           className="absolute border-2 border-yellow-400 bg-yellow-400/10 rounded"
           style={{
-            left: Math.min(startPos.x, currentPos.x) * scaleX,
-            top: Math.min(startPos.y, currentPos.y) * scaleY,
-            width: Math.abs(currentPos.x - startPos.x) * scaleX,
-            height: Math.abs(currentPos.y - startPos.y) * scaleY
+            left: `${Math.min(startPos.x, currentPos.x) * 100}%`,
+            top: `${Math.min(startPos.y, currentPos.y) * 100}%`,
+            width: `${Math.abs(currentPos.x - startPos.x) * 100}%`,
+            height: `${Math.abs(currentPos.y - startPos.y) * 100}%`
           }}
         />
       )}
@@ -96,10 +92,10 @@ function BlurRegionTool({ active, canvasWidth, canvasHeight }: BlurRegionToolPro
             key={r.id}
             className="absolute border border-yellow-500/50 bg-yellow-500/10 rounded"
             style={{
-              left: r.region.x * scaleX,
-              top: r.region.y * scaleY,
-              width: r.region.width * scaleX,
-              height: r.region.height * scaleY
+              left: `${(r.region.x / canvasWidth) * 100}%`,
+              top: `${(r.region.y / canvasHeight) * 100}%`,
+              width: `${(r.region.width / canvasWidth) * 100}%`,
+              height: `${(r.region.height / canvasHeight) * 100}%`
             }}
           >
             <span className="absolute -top-5 left-0 text-[9px] text-yellow-400 bg-surface-100 px-1 rounded">

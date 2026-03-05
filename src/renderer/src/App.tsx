@@ -1,6 +1,7 @@
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import TitleBar from './components/ui/TitleBar'
 import Sidebar from './components/ui/Sidebar'
+import ToastContainer from './components/ui/Toast'
 import Home from './pages/Home'
 import Recording from './pages/Recording'
 import Editor from './pages/Editor'
@@ -23,6 +24,7 @@ function App(): JSX.Element {
           </main>
         </div>
       </div>
+      <ToastContainer />
     </HashRouter>
   )
 }

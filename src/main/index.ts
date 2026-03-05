@@ -1,4 +1,7 @@
-import { app, shell, BrowserWindow, Tray, Menu, nativeImage, ipcMain, desktopCapturer, screen } from 'electron'
+import {
+  app, shell, BrowserWindow, Tray, Menu, nativeImage,
+  ipcMain, desktopCapturer, screen, globalShortcut
+} from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc/handlers'
@@ -97,9 +100,21 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
 
+  globalShortcut.register('F9', () => {
+    mainWindow?.webContents.send('tray:start-recording')
+  })
+
+  globalShortcut.register('F10', () => {
+    mainWindow?.webContents.send('tray:stop-recording')
+  })
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
 })
 
 app.on('window-all-closed', () => {
@@ -107,3 +122,4 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 })
+

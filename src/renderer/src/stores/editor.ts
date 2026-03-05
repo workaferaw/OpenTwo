@@ -5,6 +5,8 @@ export interface ZoomKeyframe {
   timestamp: number
   region: { x: number; y: number; width: number; height: number }
   duration: number
+  transitionIn: number
+  transitionOut: number
   easing: 'ease-in-out' | 'ease-in' | 'ease-out' | 'linear' | 'spring'
 }
 
@@ -16,6 +18,12 @@ export interface BlurRegion {
 }
 
 export type AspectRatio = '16:9' | '9:16' | '4:3' | '1:1' | 'original'
+
+export interface CursorFollowConfig {
+  enabled: boolean
+  zoomFactor: number
+  smoothing: number
+}
 
 export interface BackgroundConfig {
   type: 'solid' | 'gradient' | 'image'
@@ -39,6 +47,7 @@ interface EditorState {
   aspectRatio: AspectRatio
   background: BackgroundConfig
   showBrowserFrame: boolean
+  cursorFollow: CursorFollowConfig
 
   setProjectPath: (path: string | null) => void
   setVideoSrc: (src: string | null) => void
@@ -57,7 +66,14 @@ interface EditorState {
   setAspectRatio: (ratio: AspectRatio) => void
   setBackground: (bg: Partial<BackgroundConfig>) => void
   setShowBrowserFrame: (show: boolean) => void
+  setCursorFollow: (config: Partial<CursorFollowConfig>) => void
   reset: () => void
+}
+
+const defaultCursorFollow: CursorFollowConfig = {
+  enabled: false,
+  zoomFactor: 2,
+  smoothing: 0.08
 }
 
 const defaultBackground: BackgroundConfig = {
@@ -82,6 +98,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   aspectRatio: 'original',
   background: { ...defaultBackground },
   showBrowserFrame: false,
+  cursorFollow: { ...defaultCursorFollow },
 
   setProjectPath: (path) => set({ projectPath: path }),
   setVideoSrc: (src) => set({ videoSrc: src }),
@@ -120,6 +137,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   setBackground: (bg) =>
     set((state) => ({ background: { ...state.background, ...bg } })),
   setShowBrowserFrame: (show) => set({ showBrowserFrame: show }),
+  setCursorFollow: (config) =>
+    set((state) => ({ cursorFollow: { ...state.cursorFollow, ...config } })),
   reset: () =>
     set({
       projectPath: null,
@@ -134,6 +153,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       splitPoints: [],
       aspectRatio: 'original',
       background: { ...defaultBackground },
-      showBrowserFrame: false
+      showBrowserFrame: false,
+      cursorFollow: { ...defaultCursorFollow }
     })
 }))

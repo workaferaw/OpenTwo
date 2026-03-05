@@ -15,8 +15,22 @@ interface OpenTwoAPI {
 
   minimizeWindow: () => Promise<void>
   maximizeWindow: () => Promise<void>
+  autoSaveRecording: (options: {
+    videoBuffer: ArrayBuffer
+    cursorData: Array<{ x: number; y: number; t: number }>
+    clickEvents?: Array<{ x: number; y: number; t: number; button: number }>
+    projectName?: string
+  }) => Promise<{
+    success: boolean
+    projectDir?: string
+    webmPath?: string
+    cursorPath?: string
+    mp4Path?: string | null
+    error?: string
+  }>
   closeWindow: () => Promise<void>
   isMaximized: () => Promise<boolean>
+  resizeWindow: (mode: 'compact' | 'editor') => Promise<void>
 
   onTrayStartRecording: (callback: () => void) => () => void
   onTrayStopRecording: (callback: () => void) => () => void
@@ -37,6 +51,9 @@ interface OpenTwoAPI {
       reason: string
     }>
   >
+
+  readFileBuffer: (filePath: string) => Promise<{ success: boolean; data: ArrayBuffer | null }>
+  readJsonFile: (filePath: string) => Promise<{ success: boolean; data: unknown }>
 
   checkAdb: () => Promise<boolean>
   getPhoneDevices: () => Promise<

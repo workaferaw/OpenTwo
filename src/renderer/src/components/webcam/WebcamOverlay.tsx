@@ -75,7 +75,7 @@ function WebcamOverlay({ stream, visible }: WebcamOverlayProps): JSX.Element {
   return (
     <div
       ref={containerRef}
-      className="absolute z-20 rounded-xl overflow-hidden border-2 border-white/20 shadow-2xl cursor-move select-none"
+      className="absolute z-20 rounded-xl overflow-hidden border-2 border-white/25 shadow-2xl cursor-move select-none"
       style={{
         right: position.x,
         bottom: position.y,

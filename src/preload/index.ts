@@ -19,6 +19,7 @@ const api = {
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
   isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  resizeWindow: (mode: 'compact' | 'editor') => ipcRenderer.invoke('window:resize', mode),
 
   onTrayStartRecording: (callback: () => void) => {
     ipcRenderer.on('tray:start-recording', callback)
@@ -44,6 +45,16 @@ const api = {
     screenWidth: number,
     screenHeight: number
   ) => ipcRenderer.invoke('zoom:detect', cursorData, screenWidth, screenHeight),
+
+  readFileBuffer: (filePath: string) => ipcRenderer.invoke('file:read-buffer', filePath),
+  readJsonFile: (filePath: string) => ipcRenderer.invoke('file:read-json', filePath),
+
+  autoSaveRecording: (options: {
+    videoBuffer: ArrayBuffer
+    cursorData: Array<{ x: number; y: number; t: number }>
+    clickEvents?: Array<{ x: number; y: number; t: number; button: number }>
+    projectName?: string
+  }) => ipcRenderer.invoke('recording:auto-save', options),
 
   checkAdb: () => ipcRenderer.invoke('phone:check-adb'),
   getPhoneDevices: () => ipcRenderer.invoke('phone:get-devices')

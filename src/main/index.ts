@@ -3,28 +3,52 @@ import {
   ipcMain, desktopCapturer, screen, globalShortcut
 } from 'electron'
 import { join } from 'path'
-import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import { registerIpcHandlers } from './ipc/handlers'
+
+// Inline dev detection — avoids @electron-toolkit/utils module load crash
+const isDev = (): boolean => !app.isPackaged
+
+// Inline window shortcut watcher (dev only: F12 for devtools)
+function watchWindowShortcuts(window: BrowserWindow): void {
+  window.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.code === 'F12') {
+      if (window.webContents.isDevToolsOpened()) {
+        window.webContents.closeDevTools()
+      } else {
+        window.webContents.openDevTools({ mode: 'undocked' })
+      }
+    }
+  })
+}
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 
+
+function getIconPath(): string {
+  const iconName = process.platform === 'win32' ? 'icon.png' : 'icon.png'
+  return join(__dirname, '../../build', iconName)
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 720,
-    minWidth: 900,
-    minHeight: 600,
+    width: 680,
+    height: 460,
+    minWidth: 580,
+    minHeight: 400,
     show: false,
     frame: false,
     titleBarStyle: 'hidden',
-    backgroundColor: '#111114',
+    backgroundColor: '#0a0a0c',
+    resizable: true,
+    icon: getIconPath(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      webSecurity: !isDev()
     }
   })
 
@@ -37,7 +61,7 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+  if (isDev() && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
@@ -45,7 +69,13 @@ function createWindow(): void {
 }
 
 function createTray(): void {
-  const icon = nativeImage.createEmpty()
+  const trayIconPath = join(__dirname, '../../build/tray-icon.png')
+  let icon: Electron.NativeImage
+  try {
+    icon = nativeImage.createFromPath(trayIconPath)
+  } catch {
+    icon = nativeImage.createEmpty()
+  }
   tray = new Tray(icon)
 
   const contextMenu = Menu.buildFromTemplate([
@@ -63,10 +93,10 @@ function createTray(): void {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.opentwo.app')
+  if (process.platform === 'win32') app.setAppUserModelId('com.opentwo.app')
 
   app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
+    watchWindowShortcuts(window)
   })
 
   registerIpcHandlers()
@@ -81,6 +111,18 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('window:close', () => mainWindow?.close())
   ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized())
+  ipcMain.handle('window:resize', (_, mode: 'compact' | 'editor') => {
+    if (!mainWindow) return
+    if (mode === 'editor') {
+      mainWindow.setMinimumSize(900, 600)
+      mainWindow.setSize(1100, 720, true)
+      mainWindow.center()
+    } else {
+      mainWindow.setMinimumSize(580, 400)
+      mainWindow.setSize(680, 460, true)
+      mainWindow.center()
+    }
+  })
 
   ipcMain.handle('desktop-capturer:get-sources', async () => {
     const sources = await desktopCapturer.getSources({
@@ -95,7 +137,10 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('cursor:get-position', () => {
-    return screen.getCursorScreenPoint()
+    const point = screen.getCursorScreenPoint()
+    const display = screen.getDisplayNearestPoint(point)
+    const sf = display.scaleFactor
+    return { x: point.x * sf, y: point.y * sf }
   })
 
   createWindow()
@@ -109,7 +154,7 @@ app.whenReady().then(() => {
     mainWindow?.webContents.send('tray:stop-recording')
   })
 
-  if (!is.dev) {
+  if (!isDev()) {
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
     autoUpdater.checkForUpdatesAndNotify()

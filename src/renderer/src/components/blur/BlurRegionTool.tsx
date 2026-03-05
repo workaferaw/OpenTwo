@@ -75,7 +75,7 @@ function BlurRegionTool({ active, canvasWidth, canvasHeight }: BlurRegionToolPro
     >
       {drawing && (
         <div
-          className="absolute border-2 border-yellow-400 bg-yellow-400/10 rounded"
+          className="absolute border-2 border-amber-400 bg-amber-400/10 rounded-lg"
           style={{
             left: `${Math.min(startPos.x, currentPos.x) * 100}%`,
             top: `${Math.min(startPos.y, currentPos.y) * 100}%`,
@@ -90,7 +90,7 @@ function BlurRegionTool({ active, canvasWidth, canvasHeight }: BlurRegionToolPro
         .map((r) => (
           <div
             key={r.id}
-            className="absolute border border-yellow-500/50 bg-yellow-500/10 rounded"
+            className="absolute border border-amber-500/50 bg-amber-500/10 rounded-lg"
             style={{
               left: `${(r.region.x / canvasWidth) * 100}%`,
               top: `${(r.region.y / canvasHeight) * 100}%`,
@@ -98,7 +98,7 @@ function BlurRegionTool({ active, canvasWidth, canvasHeight }: BlurRegionToolPro
               height: `${(r.region.height / canvasHeight) * 100}%`
             }}
           >
-            <span className="absolute -top-5 left-0 text-[9px] text-yellow-400 bg-surface-100 px-1 rounded">
+            <span className="absolute -top-5 left-0 text-[10px] text-amber-400 bg-surface-100 px-1 rounded-lg">
               Blur
             </span>
           </div>

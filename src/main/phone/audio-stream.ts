@@ -1,11 +1,5 @@
-/**
- * Phone microphone audio streaming over USB.
- *
- * Routes audio from the phone's microphone through ADB port forwarding
- * so it can be used as an audio input in OpenTwo.
- *
- * Implementation will be completed in Phase 6.
- */
+import { spawn, ChildProcess } from 'child_process'
+import { forwardPort, removeForward } from './adb-bridge'
 
 export interface AudioStreamOptions {
   serial: string
@@ -15,15 +9,54 @@ export interface AudioStreamOptions {
 }
 
 export class PhoneAudioStream {
+  private process: ChildProcess | null = null
   private active = false
+  private serial = ''
+  private localPort = 0
 
-  async start(_options: AudioStreamOptions): Promise<void> {
-    this.active = true
-    // Phase 6: implement audio stream reception
+  async start(options: AudioStreamOptions): Promise<boolean> {
+    this.serial = options.serial
+    this.localPort = options.localPort
+
+    const forwarded = await forwardPort(options.serial, options.localPort, options.remotePort)
+    if (!forwarded) return false
+
+    try {
+      this.process = spawn('adb', [
+        '-s',
+        options.serial,
+        'exec-out',
+        `cat /dev/audio`
+      ])
+
+      this.process.on('error', () => {
+        this.active = false
+      })
+
+      this.process.on('exit', () => {
+        this.active = false
+      })
+
+      this.active = true
+      return true
+    } catch {
+      return false
+    }
   }
 
-  stop(): void {
+  getOutputStream(): NodeJS.ReadableStream | null {
+    return this.process?.stdout ?? null
+  }
+
+  async stop(): Promise<void> {
+    if (this.process) {
+      this.process.kill()
+      this.process = null
+    }
     this.active = false
+    if (this.serial && this.localPort) {
+      await removeForward(this.serial, this.localPort)
+    }
   }
 
   isActive(): boolean {

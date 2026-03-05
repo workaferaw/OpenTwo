@@ -27,7 +27,26 @@ const api = {
   onTrayStopRecording: (callback: () => void) => {
     ipcRenderer.on('tray:stop-recording', callback)
     return () => ipcRenderer.removeListener('tray:stop-recording', callback)
-  }
+  },
+
+  openFileDialog: () => ipcRenderer.invoke('dialog:open-file'),
+  showExportDialog: () => ipcRenderer.invoke('dialog:save-export'),
+
+  exportVideo: (options: Record<string, unknown>) => ipcRenderer.invoke('ffmpeg:export', options),
+  onExportProgress: (callback: (percent: number) => void) => {
+    const handler = (_: unknown, percent: number) => callback(percent)
+    ipcRenderer.on('ffmpeg:progress', handler)
+    return () => ipcRenderer.removeListener('ffmpeg:progress', handler)
+  },
+
+  detectZoomCandidates: (
+    cursorData: Array<{ x: number; y: number; t: number }>,
+    screenWidth: number,
+    screenHeight: number
+  ) => ipcRenderer.invoke('zoom:detect', cursorData, screenWidth, screenHeight),
+
+  checkAdb: () => ipcRenderer.invoke('phone:check-adb'),
+  getPhoneDevices: () => ipcRenderer.invoke('phone:get-devices')
 }
 
 if (process.contextIsolated) {

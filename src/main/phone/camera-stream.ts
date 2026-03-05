@@ -1,12 +1,5 @@
-/**
- * Phone camera streaming over USB.
- *
- * This module will handle receiving the camera feed from an Android phone
- * connected via USB using ADB port forwarding. The phone runs a lightweight
- * streaming service that sends MJPEG or H.264 frames over a TCP socket.
- *
- * Implementation will be completed in Phase 6.
- */
+import { spawn, ChildProcess } from 'child_process'
+import { forwardPort, removeForward } from './adb-bridge'
 
 export interface CameraStreamOptions {
   serial: string
@@ -16,15 +9,54 @@ export interface CameraStreamOptions {
 }
 
 export class PhoneCameraStream {
+  private process: ChildProcess | null = null
   private active = false
+  private serial = ''
+  private localPort = 0
 
-  async start(_options: CameraStreamOptions): Promise<void> {
-    this.active = true
-    // Phase 6: implement camera stream reception
+  async start(options: CameraStreamOptions): Promise<boolean> {
+    this.serial = options.serial
+    this.localPort = options.localPort
+
+    const forwarded = await forwardPort(options.serial, options.localPort, options.remotePort)
+    if (!forwarded) return false
+
+    try {
+      this.process = spawn('adb', [
+        '-s',
+        options.serial,
+        'exec-out',
+        `screenrecord --output-format=h264 --size ${options.resolution.width}x${options.resolution.height} -`
+      ])
+
+      this.process.on('error', () => {
+        this.active = false
+      })
+
+      this.process.on('exit', () => {
+        this.active = false
+      })
+
+      this.active = true
+      return true
+    } catch {
+      return false
+    }
   }
 
-  stop(): void {
+  getOutputStream(): NodeJS.ReadableStream | null {
+    return this.process?.stdout ?? null
+  }
+
+  async stop(): Promise<void> {
+    if (this.process) {
+      this.process.kill()
+      this.process = null
+    }
     this.active = false
+    if (this.serial && this.localPort) {
+      await removeForward(this.serial, this.localPort)
+    }
   }
 
   isActive(): boolean {

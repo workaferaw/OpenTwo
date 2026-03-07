@@ -61,7 +61,33 @@ const api = {
   getPhoneDevices: () => ipcRenderer.invoke('phone:get-devices'),
 
   startGlobalMouseCapture: (startTime: number) => ipcRenderer.invoke('global-mouse:start', startTime),
-  stopGlobalMouseCapture: () => ipcRenderer.invoke('global-mouse:stop') as Promise<Array<{ x: number; y: number; t: number; button: number }>>
+  stopGlobalMouseCapture: () => ipcRenderer.invoke('global-mouse:stop') as Promise<Array<{ x: number; y: number; t: number; button: number }>>,
+
+  exportReadyVideo: (options: {
+    inputPath: string
+    outputPath: string
+    cursorData: Array<{ x: number; y: number; t: number }>
+    clickEvents: Array<{ x: number; y: number; t: number; button: number }>
+    displayInfo?: { scaleFactor: number; width: number; height: number }
+  }) => ipcRenderer.invoke('ffmpeg:export-ready', options) as Promise<{ success: boolean; path?: string; error?: string }>,
+
+  // Canvas-based export (frame-by-frame rendering)
+  canvasExportStart: (options: {
+    outputPath: string
+    audioSourcePath: string
+    width: number
+    height: number
+    fps: number
+    totalFrames: number
+  }) => ipcRenderer.invoke('canvas-export:start', options),
+
+  canvasExportFrame: (frameIndex: number, pngBuffer: ArrayBuffer) =>
+    ipcRenderer.invoke('canvas-export:frame', frameIndex, pngBuffer),
+
+  canvasExportFinish: () => ipcRenderer.invoke('canvas-export:finish'),
+
+  canvasExportSaveBlob: (webmBuffer: ArrayBuffer) =>
+    ipcRenderer.invoke('canvas-export:save-blob', webmBuffer) as Promise<{ success: boolean; path?: string; error?: string }>,
 }
 
 if (process.contextIsolated) {

@@ -1,7 +1,10 @@
 import ffmpeg from 'fluent-ffmpeg'
 import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg'
 import { path as ffprobePath } from '@ffprobe-installer/ffprobe'
-import { execFile } from 'child_process'
+import { execFile, execFileSync, spawn } from 'child_process'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { writeFileSync, unlinkSync, existsSync, mkdirSync, rmdirSync } from 'fs'
 
 ffmpeg.setFfmpegPath(ffmpegPath)
 ffmpeg.setFfprobePath(ffprobePath)
@@ -203,84 +206,150 @@ function computeCursorScale(
 }
 
 /**
- * Build a per-segment FFmpeg crop+scale filter expression.
- * Uses if(between(t,...)) to select crop window per zoom segment,
- * with linear interpolation during transitions.
+ * Build zoom segments into a series of FFmpeg commands that:
+ * 1. Split video at zoom boundaries
+ * 2. Apply static crop to zoomed parts
+ * 3. Concatenate all parts
+ *
+ * FFmpeg N-92722 (bundled version) doesn't support expression-based crop filters
+ * with time variables reliably. This segment-based approach uses only hardcoded
+ * crop values which are guaranteed to work.
  */
-function buildZoomFilterExpr(
+async function processZoomSegments(
+  inputPath: string,
+  outputPath: string,
   vw: number,
   vh: number,
   zoomSegments: ZoomSegment[],
   cursorData: CursorPt[],
   scX: number,
   scY: number,
-  durationSec: number
-): string {
-  if (zoomSegments.length === 0) return `scale=1920:1080`
+  durationSec: number,
+  onProgress?: (percent: number) => void
+): Promise<void> {
 
   const cropW = Math.round(vw / DEFAULT_ZOOM_FACTOR)
   const cropH = Math.round(vh / DEFAULT_ZOOM_FACTOR)
 
-  // Build X, Y, W, H expressions
-  const xParts: string[] = []
-  const yParts: string[] = []
-  const wParts: string[] = []
-  const hParts: string[] = []
+  // Build timeline: alternating non-zoom and zoom segments
+  interface Segment {
+    start: number
+    end: number
+    isZoom: boolean
+    cropX?: number
+    cropY?: number
+  }
+
+  const timeline: Segment[] = []
+  let cursor = 0
 
   for (const seg of zoomSegments) {
-    const tStart = Math.max(0, (seg.startMs - seg.transitionInMs) / 1000)
-    const tInEnd = seg.startMs / 1000
-    // Clamp end times to video duration so crop expression doesn't extend past the video
-    const tHoldEnd = Math.min(seg.endMs / 1000, durationSec)
-    const tEnd = Math.min((seg.endMs + seg.transitionOutMs) / 1000, durationSec)
-    const inDur = seg.transitionInMs / 1000
-    const outDur = Math.max(0.001, tEnd - tHoldEnd)
+    const zoomStart = Math.max(0, seg.startMs / 1000)
+    const zoomEnd = Math.min(seg.endMs / 1000, durationSec)
 
-    // Find cursor center for this segment
+    // Compute crop position
     const midMs = (seg.startMs + seg.endMs) / 2
     const center = interpolateCursor(cursorData, midMs)
     const cx = Math.round(center.x * scX)
     const cy = Math.round(center.y * scY)
     const clampedCx = Math.max(cropW / 2, Math.min(cx, vw - cropW / 2))
     const clampedCy = Math.max(cropH / 2, Math.min(cy, vh - cropH / 2))
-    const targetX = Math.round(clampedCx - cropW / 2)
-    const targetY = Math.round(clampedCy - cropH / 2)
+    const cropX = Math.round(clampedCx - cropW / 2)
+    const cropY = Math.round(clampedCy - cropH / 2)
 
-    // Transition in
-    if (inDur > 0.001) {
-      const p = `(t-${tStart.toFixed(3)})/${inDur.toFixed(3)}`
-      xParts.push(`if(between(t,${tStart.toFixed(3)},${tInEnd.toFixed(3)}),${targetX}*${p},0)`)
-      yParts.push(`if(between(t,${tStart.toFixed(3)},${tInEnd.toFixed(3)}),${targetY}*${p},0)`)
-      wParts.push(`if(between(t,${tStart.toFixed(3)},${tInEnd.toFixed(3)}),${vw}-(${vw}-${cropW})*${p},0)`)
-      hParts.push(`if(between(t,${tStart.toFixed(3)},${tInEnd.toFixed(3)}),${vh}-(${vh}-${cropH})*${p},0)`)
+    // Non-zoom segment before this zoom
+    if (cursor < zoomStart - 0.01) {
+      timeline.push({ start: cursor, end: zoomStart, isZoom: false })
     }
 
-    // Hold
-    xParts.push(`if(between(t,${tInEnd.toFixed(3)},${tHoldEnd.toFixed(3)}),${targetX},0)`)
-    yParts.push(`if(between(t,${tInEnd.toFixed(3)},${tHoldEnd.toFixed(3)}),${targetY},0)`)
-    wParts.push(`if(between(t,${tInEnd.toFixed(3)},${tHoldEnd.toFixed(3)}),${cropW},0)`)
-    hParts.push(`if(between(t,${tInEnd.toFixed(3)},${tHoldEnd.toFixed(3)}),${cropH},0)`)
-
-    // Transition out
-    if (outDur > 0.001) {
-      const p = `(t-${tHoldEnd.toFixed(3)})/${outDur.toFixed(3)}`
-      xParts.push(`if(between(t,${tHoldEnd.toFixed(3)},${tEnd.toFixed(3)}),${targetX}*(1-${p}),0)`)
-      yParts.push(`if(between(t,${tHoldEnd.toFixed(3)},${tEnd.toFixed(3)}),${targetY}*(1-${p}),0)`)
-      wParts.push(`if(between(t,${tHoldEnd.toFixed(3)},${tEnd.toFixed(3)}),${cropW}+(${vw}-${cropW})*${p},0)`)
-      hParts.push(`if(between(t,${tHoldEnd.toFixed(3)},${tEnd.toFixed(3)}),${cropH}+(${vh}-${cropH})*${p},0)`)
-    }
+    // Zoom segment
+    timeline.push({ start: zoomStart, end: zoomEnd, isZoom: true, cropX, cropY })
+    cursor = zoomEnd
   }
 
-  const xExpr = xParts.join('+') || '0'
-  const yExpr = yParts.join('+') || '0'
-  const wSum = wParts.join('+') || String(vw)
-  const hSum = hParts.join('+') || String(vh)
+  // Non-zoom segment after last zoom
+  if (cursor < durationSec - 0.01) {
+    timeline.push({ start: cursor, end: durationSec, isZoom: false })
+  }
 
-  // When no segment is active, sums are 0 → use full frame
-  const wExpr = `if(eq(${wSum},0),${vw},${wSum})`
-  const hExpr = `if(eq(${hSum},0),${vh},${hSum})`
+  console.log('[OpenTwo Export] Timeline segments:', timeline.length)
+  timeline.forEach((s, i) => {
+    console.log(`  [${i}] ${s.isZoom ? 'ZOOM' : 'FULL'} ${s.start.toFixed(2)}s → ${s.end.toFixed(2)}s` +
+      (s.isZoom ? ` crop=${cropW}:${cropH}:${s.cropX}:${s.cropY}` : ''))
+  })
 
-  return `crop=w='${wExpr}':h='${hExpr}':x='${xExpr}':y='${yExpr}',scale=1920:1080`
+  // Create temp dir for segments
+  const tmpDir = join(tmpdir(), `opentwo-zoom-${Date.now()}`)
+  mkdirSync(tmpDir, { recursive: true })
+
+  const segmentFiles: string[] = []
+
+  try {
+    // Step 1: Encode each segment separately
+    for (let i = 0; i < timeline.length; i++) {
+      const seg = timeline[i]
+      const segFile = join(tmpDir, `seg_${i}.mp4`)
+      segmentFiles.push(segFile)
+
+      const duration = seg.end - seg.start
+      const vf = seg.isZoom
+        ? `crop=${cropW}:${cropH}:${seg.cropX}:${seg.cropY},scale=${vw}:${vh}`
+        : `scale=${vw}:${vh}`
+
+      console.log(`[OpenTwo Export] Encoding segment ${i}: ${vf} (${duration.toFixed(2)}s)`)
+
+      execFileSync(ffmpegPath, [
+        '-y',
+        '-ss', seg.start.toFixed(3),
+        '-i', inputPath,
+        '-t', duration.toFixed(3),
+        '-vf', vf,
+        '-c:v', 'libx264',
+        '-pix_fmt', 'yuv420p',
+        '-preset', 'fast',
+        '-crf', '20',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        segFile
+      ], { timeout: 120000 })
+
+      if (onProgress) {
+        onProgress(Math.round(((i + 1) / timeline.length) * 80))
+      }
+    }
+
+    // Step 2: Create concat list file
+    const concatList = join(tmpDir, 'concat.txt')
+    const concatContent = segmentFiles.map(f => `file '${f.replace(/\\/g, '/')}'`).join('\n')
+    writeFileSync(concatList, concatContent)
+
+    console.log('[OpenTwo Export] Concatenating', segmentFiles.length, 'segments...')
+
+    // Step 3: Concatenate
+    execFileSync(ffmpegPath, [
+      '-y',
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', concatList,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      outputPath
+    ], { timeout: 120000 })
+
+    if (onProgress) onProgress(100)
+    console.log('[OpenTwo Export] Done! Output:', outputPath)
+
+  } finally {
+    // Cleanup temp files
+    for (const f of segmentFiles) {
+      if (existsSync(f)) try { unlinkSync(f) } catch (_e) { /* ignore */ }
+    }
+    try {
+      const concatList = join(tmpDir, 'concat.txt')
+      if (existsSync(concatList)) unlinkSync(concatList)
+      require('fs').rmdirSync(tmpDir)
+    } catch (_e) { /* ignore */ }
+  }
 }
 
 export function exportReadyVideo(
@@ -322,48 +391,36 @@ export function exportReadyVideo(
       console.log('[OpenTwo Export] Clicks:', clicks.length, '| Scale:', scX.toFixed(3), scY.toFixed(3))
       console.log('[OpenTwo Export] Zoom segments:', zoomSegments.length, JSON.stringify(zoomSegments))
 
-      // Build filter expression
-      const filterExpr = buildZoomFilterExpr(vw, vh, zoomSegments, data, scX, scY, durationSec)
-      console.log('[OpenTwo Export] Filter:', filterExpr.substring(0, 200), '...')
-
-      // Use spawn for full control over arguments (no escaping issues)
-      const args = [
-        '-y',
-        '-i', options.inputPath,
-        '-vf', filterExpr,
-        '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
-        '-preset', 'medium',
-        '-crf', '18',
-        '-c:a', 'aac',
-        '-b:a', '192k',
-        '-movflags', '+faststart',
-        options.outputPath
-      ]
-
-      const proc = execFile(ffmpegPath, args, { maxBuffer: 1024 * 1024 * 10 }, (error) => {
-        if (error) {
-          reject(new Error(`FFmpeg failed: ${error.message}`))
-        } else {
+      // Use segment-based approach (split + static crop + concat)
+      // because FFmpeg N-92722 doesn't support expression-based crop filters
+      if (zoomSegments.length > 0) {
+        try {
+          await processZoomSegments(
+            options.inputPath, options.outputPath,
+            vw, vh, zoomSegments, data, scX, scY, durationSec, onProgress
+          )
           resolve(options.outputPath)
+        } catch (err) {
+          reject(err)
         }
-      })
+      } else {
+        // No zoom — simple scale-only encode
+        console.log('[OpenTwo Export] No zoom segments, simple encode')
+        const proc = spawn(ffmpegPath, [
+          '-y', '-i', options.inputPath,
+          '-vf', `scale=${vw}:${vh}`,
+          '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+          '-preset', 'medium', '-crf', '18',
+          '-c:a', 'aac', '-b:a', '192k',
+          '-movflags', '+faststart',
+          options.outputPath
+        ])
 
-      // Parse progress from stderr for onProgress callback
-      if (onProgress && proc.stderr) {
-        let lastPercent = 0
-        proc.stderr.on('data', (chunk: Buffer) => {
-          const line = chunk.toString()
-          const timeMatch = line.match(/time=(\d+):(\d+):(\d+\.\d+)/)
-          if (timeMatch) {
-            const secs = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseFloat(timeMatch[3])
-            const pct = Math.min(100, Math.round((secs / durationSec) * 100))
-            if (pct > lastPercent) {
-              lastPercent = pct
-              onProgress(pct)
-            }
-          }
+        proc.on('close', (code: number | null) => {
+          if (code === 0) resolve(options.outputPath)
+          else reject(new Error(`FFmpeg exited with code ${code}`))
         })
+        proc.on('error', (err: Error) => reject(err))
       }
     })
   })

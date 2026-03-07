@@ -31,6 +31,7 @@ function Editor({ onBack }: EditorProps): JSX.Element {
 
   const [activeTool, setActiveTool] = useState<EditorTool>('select')
   const [cursorData, setCursorData] = useState<CursorPoint[]>([])
+  const [clickData, setClickData] = useState<Array<{ x: number; y: number; t: number; button: number }>>([])
   const [displayInfo, setDisplayInfo] = useState<{ scaleFactor: number; width: number; height: number } | null>(null)
   const [videoSize, setVideoSize] = useState({ width: 1920, height: 1080 })
   const [loadedFilePath, setLoadedFilePath] = useState<string | null>(null)
@@ -125,6 +126,15 @@ function Editor({ onBack }: EditorProps): JSX.Element {
       setDisplayInfo(null)
       setCursorFollow({ enabled: false })
       addToast('Loaded recording (no cursor data found)', 'info')
+    }
+
+    // Also load clicks.json for zoom export
+    const clicksPath = dir + sep + 'clicks.json'
+    const clicksResult = await window.api.readJsonFile(clicksPath)
+    if (clicksResult.success && Array.isArray(clicksResult.data)) {
+      setClickData(clicksResult.data)
+    } else {
+      setClickData([])
     }
   }, [setVideoSrc, setCursorFollow, addToast])
 
@@ -254,6 +264,38 @@ function Editor({ onBack }: EditorProps): JSX.Element {
     if (!loadedFilePath) return
     const outputPath = await window.api.showExportDialog()
     if (!outputPath) return
+
+    // Canvas-based export: renders each frame with the same zoom/follow as the editor preview
+    if (videoRef.current && videoRef.current.readyState >= 2) {
+      const zoomKeyframes = useEditorStore.getState().zoomKeyframes
+      const cursorFollowState = useEditorStore.getState().cursorFollow
+
+      addToast('Exporting with canvas rendering...', 'info')
+      try {
+        const { canvasExport } = await import('../export/canvasExport')
+        await canvasExport({
+          videoElement: videoRef.current,
+          outputPath,
+          audioSourcePath: loadedFilePath,
+          cursorData,
+          displayInfo,
+          zoomKeyframes,
+          cursorFollow: cursorFollowState,
+          fps: 30,
+          onProgress: (pct) => {
+            // Could update a progress bar here
+            if (pct % 10 === 0) console.log(`[Export] ${pct}%`)
+          }
+        })
+        addToast('Export complete!', 'success')
+      } catch (err) {
+        console.error('Canvas export failed:', err)
+        addToast(`Export failed: ${err}`, 'error')
+      }
+      return
+    }
+
+    // Fallback: basic export without canvas rendering
     const format = outputPath.endsWith('.webm') ? 'webm' : 'mp4'
     const blurExport = blurRegions.map((r) => ({
       x: r.region.x,
@@ -263,22 +305,13 @@ function Editor({ onBack }: EditorProps): JSX.Element {
       startTime: r.startTime,
       endTime: r.endTime
     }))
-    const zoomExport = useEditorStore.getState().zoomKeyframes.map((kf) => ({
-      timestamp: kf.timestamp,
-      region: kf.region,
-      duration: kf.duration,
-      transitionIn: kf.transitionIn,
-      transitionOut: kf.transitionOut,
-      easing: kf.easing
-    }))
     const result = await exportVideo({
       inputPath: loadedFilePath,
       outputPath,
       format: format as 'mp4' | 'webm',
       resolution: '1080p',
       fps: 30,
-      blurRegions: blurExport,
-      zoomKeyframes: zoomExport
+      blurRegions: blurExport
     })
     addToast(
       result.success
@@ -286,7 +319,7 @@ function Editor({ onBack }: EditorProps): JSX.Element {
         : `Export failed: ${result.error}`,
       result.success ? 'success' : 'error'
     )
-  }, [loadedFilePath, blurRegions, exportVideo, addToast])
+  }, [loadedFilePath, blurRegions, exportVideo, addToast, cursorData, displayInfo])
 
   if (!videoSrc) {
     return (

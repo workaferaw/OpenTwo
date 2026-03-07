@@ -85,6 +85,36 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
+    'ffmpeg:export-ready',
+    async (event, options: {
+      inputPath: string
+      outputPath: string
+      cursorData: Array<{ x: number; y: number; t: number }>
+      clickEvents: Array<{ x: number; y: number; t: number; button: number }>
+      displayInfo?: { scaleFactor: number; width: number; height: number }
+    }) => {
+      try {
+        const result = await exportReadyVideo(
+          {
+            inputPath: options.inputPath,
+            outputPath: options.outputPath,
+            cursorData: options.cursorData,
+            clickEvents: options.clickEvents,
+            displayInfo: options.displayInfo
+          },
+          (percent) => {
+            const win = BrowserWindow.fromWebContents(event.sender)
+            win?.webContents.send('ffmpeg:progress', percent)
+          }
+        )
+        return { success: true, path: result }
+      } catch (err) {
+        return { success: false, error: String(err) }
+      }
+    }
+  )
+
+  ipcMain.handle(
     'zoom:detect',
     async (
       _,

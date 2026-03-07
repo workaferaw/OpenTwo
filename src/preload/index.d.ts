@@ -64,6 +64,30 @@ interface OpenTwoAPI {
 
   startGlobalMouseCapture: (startTime: number) => Promise<boolean>
   stopGlobalMouseCapture: () => Promise<Array<{ x: number; y: number; t: number; button: number }>>
+
+  exportReadyVideo: (options: {
+    inputPath: string
+    outputPath: string
+    cursorData: Array<{ x: number; y: number; t: number }>
+    clickEvents: Array<{ x: number; y: number; t: number; button: number }>
+    displayInfo?: { scaleFactor: number; width: number; height: number }
+  }) => Promise<{ success: boolean; path?: string; error?: string }>
+
+  // Canvas-based export
+  canvasExportStart: (options: {
+    outputPath: string
+    audioSourcePath: string
+    width: number
+    height: number
+    fps: number
+    totalFrames: number
+  }) => Promise<{ success: boolean }>
+  canvasExportFrame: (
+    frameIndex: number,
+    pngBuffer: ArrayBuffer
+  ) => Promise<{ success: boolean; progress?: number }>
+  canvasExportFinish: () => Promise<{ success: boolean; path?: string; error?: string }>
+  canvasExportSaveBlob: (webmBuffer: ArrayBuffer) => Promise<{ success: boolean; path?: string; error?: string }>
 }
 
 declare global {

@@ -8,6 +8,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import { registerIpcHandlers } from './ipc/handlers'
 import { startGlobalClickCapture, stopGlobalClickCapture } from './capture/global-mouse'
+import { registerCanvasExportHandlers } from './ffmpeg/canvas-export'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -107,6 +108,9 @@ app.whenReady().then(() => {
   })
 
   registerIpcHandlers()
+
+  // Register canvas-based export handlers
+  registerCanvasExportHandlers()
 
   ipcMain.handle('window:minimize', () => mainWindow?.minimize())
   ipcMain.handle('window:maximize', () => {
